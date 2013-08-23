@@ -65,6 +65,21 @@ def urlfilter2pac(content, func_name='FindProxyForURLByUrlfiter', proxy='127.0.0
     function = 'function %s(url, host) {\r\n%s\r\n%sreturn "%s";\r\n}' % (func_name, '\n'.join(jsCode), ' '*indent, default)
     return function
 
+
+def make_cacheable(func):
+    from bae.api.memcache import BaeMemcache
+    cache = BaeMemcache()
+    def wrap(*args, **kwargs):
+        key = '%s %s' % (','.join(str(x) for x in args), ','.join('%s:%s' % (k, v) for k, v in kwargs.items()))
+        value = cache.get(key)
+        if value is None:
+            value = func(*args, **kwargs)
+            cache.set(key, value, 86400)
+        return value
+    return wrap
+
+
+#@make_cacheable
 def generate_pac(urlfilter_url, autoproxy_url, urlfilter_proxy, autoproxy_proxy, default_proxy='DIRECT'):
     TEMPLATE = '''
 function FindProxyForURL(url, host) {
@@ -111,7 +126,9 @@ $autoproxy_func
 
 def app(environ, start_response):
     try:
-        pac = generate_pac(URLFILTER_URL, AUTOPROXY_URL, '127.0.0.1:8086', '127.0.0.1:8087')
+        path_info = environ['PATH_INFO']
+        urlfilter_proxy, autoproxy_proxy, filename = path_info.strip('/').split('/')
+        pac = generate_pac(URLFILTER_URL, AUTOPROXY_URL, urlfilter_proxy, autoproxy_proxy)
         start_response('200 OK', [])
         return [pac]
     except Exception as e:
